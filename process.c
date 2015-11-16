@@ -104,11 +104,14 @@ int processPipe(CMD *cmd){
 	//TODO: return value for this
 	return 1;
 }
+
 int processStage(CMD *cmd){
 	int to;
 	int from;
-	if((cmd->toType == RED_OUT) || (cmd->toType == RED_OUT_APP)){
+	if(cmd->toType == RED_OUT){
 		to = open(cmd->toFile,O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR);
+	} else if(cmd->toType == RED_OUT_APP){
+		to = open(cmd->toFile,O_APPEND | O_CREAT | O_RDWR, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR);
 	} else{
 		to = STDO;
 	}
