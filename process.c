@@ -36,73 +36,124 @@ CMD **extractPipeChain(CMD *cmd, int *size, int *count){
 	CMD **pipeChain;
 	if(cmd->type == PIPE){
 		pipeChain = extractPipeChain(cmd->left,size,count);
+		while((*size) <= (*count)){
+			(*size) *= 2;
+			pipeChain = realloc(pipeChain,sizeof(CMD *)*(*size));
+		}
+		pipeChain[(*count)] = cmd->right;
+		(*count)++;
 	} else if((cmd->type == SIMPLE) || (cmd->type == SUBCMD)){
 		pipeChain = malloc(sizeof(CMD *)*(*size));
-		pipeChain[0] = cmd->left;
+		pipeChain[0] = cmd;
 		assert((*count) == 0);
 		(*count)++;
 	} else{
 		perror("pipe");
 		return 0;
 	}
-	while((*size) <= (*count)){
-		(*size) *= 2;
-		pipeChain = realloc(pipeChain,sizeof(CMD *)*(*size));
-	}
-	pipeChain[(*count)] = cmd->right;
-	(*count)++;
 	return pipeChain;
 }
+
+#define errorExit(status) perror("pipe"), exit(status)
 
 int processPipe(CMD *cmd){
 	if(cmd->type != PIPE){
 		fprintf(stderr,"Entered wrong function!\n");
 		return errno;
 	}
-	int chainSize = 0;
+	int chainSize = 1;
 	int numPiped = 0;
 	CMD **pipeChain = extractPipeChain(cmd,&chainSize,&numPiped);
 	pipeChain = realloc(pipeChain,sizeof(CMD *)*(numPiped));
 
 	//TODO: use pipe.c on pipeChain
+	struct entry{
+		int pid, status;
+	};
+	struct entry *table = (struct entry *) calloc(numPiped,sizeof(struct entry));
 
-	int *filedes = malloc(sizeof(int)*2);
-	if(pipe(filedes)==0){
-		//do pipe stuff
-		if(cmd->left != 0){
-			switch(cmd->left->type){
-				case SIMPLE:
-					//TODO
-					break;
-				case SUBCMD:
-					//TODO
-					break;
-				case PIPE:
-					//TODO
-					break;
-				default:
-					perror("pipe");
-					free(filedes);
-					free(pipeChain);
-					return errno;
-					break;
+	int *fd = malloc(sizeof(int)*2);
+	pid_t pid;
+	int status;
+	int fdin;
+	int i;
+	int j;
+
+	if(numPiped < 2){
+		fprintf(stderr,"Usage: piping less than 2 streams");
+		exit(0);
+	}
+
+	fdin = 0;
+	for(i=0;i < numPiped - 1;i++){
+		if(pipe(fd) || (pid = fork()) < 0){
+			errorExit(EXIT_FAILURE);
+		} else if(pid == 0){
+			//child
+			close(fd[0]);
+			if(fdin != 0){
+				dup2(fdin,0);
+				close(fdin);
 			}
+
+			if(fd[1] != 1){
+				dup2(fd[1],1);
+				close(fd[1]);
+			}
+			if(pipeChain[i] != 0){
+				processHelper(pipeChain[i]);
+			} else{
+				perror("pipeChain");
+
+				return errno;
+			}
+			exit(EXIT_SUCCESS);
 		} else{
-			perror("Tree format");
-			free(filedes);
-			free(pipeChain);
+			table[i].pid = pid;
+			if(i > 0){
+				close(fdin);
+			}
+			fdin = fd[0];
+			close(fd[1]);
+		}
+	}
+
+	if((pid = fork()) < 0){
+		errorExit(EXIT_FAILURE);
+	} else if(pid == 0){
+		if(fdin != 0){
+			dup2(fdin,0);
+			close(fdin);
+		}
+		if(pipeChain[numPiped-1] != 0){
+			processHelper(pipeChain[numPiped-1]);
+		} else{
+			perror("pipeChain");
 			return errno;
 		}
+		exit(EXIT_SUCCESS);
 	} else{
-		perror("pipe");
-		free(filedes);
-		free(pipeChain);
-		return errno;
+		table[numPiped-1].pid = pid;
+		if(i > 0){
+			close(fdin);
+		}
 	}
-	free(filedes);
+
+	for(i=0;i<numPiped;){
+		pid = wait(&status);
+		for(j=0;(j<numPiped) && (table[j].pid != pid);j++){
+		}
+		if(j < numPiped){
+			table[j].status = status;
+			i++;
+		}
+	}
+
+	free(fd);
 	free(pipeChain);
-	//TODO: return value for this
-	return 1;
+	free(table);
+
+	return EXIT_SUCCESS;
 }
 
 int processStage(CMD *cmd){
@@ -180,7 +231,7 @@ int processStage(CMD *cmd){
 			}
 			break;
 		case SUBCMD:
-			printf("PIPE\n");
+			secondFlag = 0;
 			break;
 		default:
 			fprintf(stderr,"Entered wrong function!\n");
@@ -199,6 +250,9 @@ int processStage(CMD *cmd){
 }
 
 int processHelper(CMD *cmd){
+	if(cmd == 0){
+		return 1;
+	}
 	int leftStatus = 0;
 	int status = 0;
 	int secondFlag = 1;
