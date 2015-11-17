@@ -17,12 +17,15 @@
 #define STDI (0)
 #define STDO (1)
 #define EXIT_STATUS(x) (WIFEXITED(x) ? WEXITSTATUS(x) : 128+WTERMSIG(x))
+#define errorExit(status) perror("pipe"), exit(status)
 
 CMD **extractPipeChain(CMD *cmd, int *size, int *count);
 
-int processStage(CMD *cmd);
+int processStage(CMD *cmd, int *backgrounded);
 
-int processHelper(CMD *cmd);
+int processPipe(CMD *cmd, int *backgrounded);
+
+int processHelper(CMD *cmd, int *backgrounded);
 
 int process(CMD *cmd);
 
@@ -54,9 +57,7 @@ CMD **extractPipeChain(CMD *cmd, int *size, int *count){
 	return pipeChain;
 }
 
-#define errorExit(status) perror("pipe"), exit(status)
-
-int processPipe(CMD *cmd){
+int processPipe(CMD *cmd, int *backgrounded){
 	if(cmd->type != PIPE){
 		fprintf(stderr,"Entered wrong function!\n");
 		return errno;
@@ -103,7 +104,7 @@ int processPipe(CMD *cmd){
 				close(fd[1]);
 			}
 			if(pipeChain[i] != 0){
-				processHelper(pipeChain[i]);
+				processHelper(pipeChain[i],backgrounded);
 			} else{
 				perror("pipeChain");
 				free(fd);
@@ -130,7 +131,7 @@ int processPipe(CMD *cmd){
 			close(fdin);
 		}
 		if(pipeChain[numPiped-1] != 0){
-			processHelper(pipeChain[numPiped-1]);
+			processHelper(pipeChain[numPiped-1],backgrounded);
 		} else{
 			perror("pipeChain");
 			free(fd);
@@ -163,7 +164,8 @@ int processPipe(CMD *cmd){
 	return EXIT_SUCCESS;
 }
 
-int processStage(CMD *cmd){
+int processStage(CMD *cmd, int *backgrounded){
+	int rightNoBack = (*backgrounded);
 	int to;
 	int from;
 	if(cmd->toType == RED_OUT){
@@ -183,7 +185,7 @@ int processStage(CMD *cmd){
 	int status = 0;
 	int secondFlag = 1;
 	if(cmd->left != 0){
-		leftStatus = processHelper(cmd->left);
+		leftStatus = processHelper(cmd->left,backgrounded);
 	}
 	switch(cmd->type){
 		case SIMPLE:
@@ -267,8 +269,12 @@ int processStage(CMD *cmd){
 					return errno;
 				} else{
 					//parent
-					if(leftStatus != 1){
+					if((leftStatus != 1) && (!(*backgrounded))){
 						waitpid(pid, &status, 0);
+					} else if (leftStatus != 1){
+						fprintf(stderr,"Backgrounded: %d\n",pid);
+						waitpid(pid, &status, WNOHANG);
+						fprintf(stderr,"Completed: %d (%d)\n",pid,status);
 					}
 				}
 			}
@@ -281,7 +287,7 @@ int processStage(CMD *cmd){
 			break;
 	}
 	if((cmd->right != 0) && secondFlag){
-		processHelper(cmd->right);
+		processHelper(cmd->right,&rightNoBack);
 	}
 	if(to != STDO){
 		close(to);
@@ -292,21 +298,25 @@ int processStage(CMD *cmd){
 	return status;
 }
 
-int processHelper(CMD *cmd){
+int processHelper(CMD *cmd, int *backgrounded){
+	int rightNoBack = (*backgrounded);
 	if(cmd == 0){
 		return 1;
 	}
 	int leftStatus = 0;
 	int status = 0;
 	int secondFlag = 1;
+	if(cmd->type == SEP_BG){
+		(*backgrounded) = 1;
+	}
 	if(cmd->type != PIPE){
 		if(cmd->left != 0){
-			leftStatus = processHelper(cmd->left);
+			leftStatus = processHelper(cmd->left,backgrounded);
 		}
 
 		switch(cmd->type){
 			case SIMPLE:
-				status = processStage(cmd);
+				status = processStage(cmd,backgrounded);
 				break;
 			case PIPE:
 				printf("PIPE\n");
@@ -324,13 +334,9 @@ int processHelper(CMD *cmd){
 			case SEP_END:
 				break;
 			case SEP_BG:
-				//TODO: Don't forget to reap zombie processes
-				return BG;
-				//printf("SEP_BG\n");
-				//fprintf(stderr,"Backgrounded: %d\n",pid);
 				break;
 			case SUBCMD:
-				status = processStage(cmd);
+				status = processStage(cmd,backgrounded);
 				break;
 			case NONE:
 				printf("NONE\n");
@@ -339,16 +345,17 @@ int processHelper(CMD *cmd){
 				break;
 		}
 		if((cmd->right != 0) && secondFlag){
-			processHelper(cmd->right);
+			processHelper(cmd->right,&rightNoBack);
 		}
 	} else{
 		//pipe
-		processPipe(cmd);
+		processPipe(cmd,backgrounded);
 	}
 	return status;
 }
 
 int process(CMD *cmd){
-	processHelper(cmd);
+	int backgrounded = 0;
+	processHelper(cmd,&backgrounded);
 	return 1;
 }
