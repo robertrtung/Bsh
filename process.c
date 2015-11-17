@@ -18,6 +18,7 @@
 #define STDO (1)
 #define EXIT_STATUS(x) (WIFEXITED(x) ? WEXITSTATUS(x) : 128+WTERMSIG(x))
 #define errorExit(status) perror("pipe"), exit(status)
+#define MY_ERR (1)
 
 CMD **extractPipeChain(CMD *cmd, int *size, int *count);
 
@@ -33,6 +34,7 @@ int process(CMD *cmd);
 //TODO: fix status updates
 //TODO: reap zombies periodically
 //TODO: Free all allocated storage
+//TODO: &&/|| with &
 
 CMD **extractPipeChain(CMD *cmd, int *size, int *count){
 	//extract the array of pointers to cmd's that need to be piped together
@@ -60,7 +62,7 @@ CMD **extractPipeChain(CMD *cmd, int *size, int *count){
 int processPipe(CMD *cmd, int *backgrounded){
 	if(cmd->type != PIPE){
 		fprintf(stderr,"Entered wrong function!\n");
-		return errno;
+		return MY_ERR;
 	}
 	int chainSize = 1;
 	int numPiped = 0;
@@ -78,6 +80,8 @@ int processPipe(CMD *cmd, int *backgrounded){
 	int fdin;
 	int i;
 	int j;
+	int outStatus = 0;
+	int tempStatus = 0;
 
 	if(numPiped < 2){
 		fprintf(stderr,"Usage: piping less than 2 streams");
@@ -104,15 +108,17 @@ int processPipe(CMD *cmd, int *backgrounded){
 				close(fd[1]);
 			}
 			if(pipeChain[i] != 0){
-				processHelper(pipeChain[i],backgrounded);
+				tempStatus = processHelper(pipeChain[i],backgrounded);
+				//fprintf(stderr,"temp status: %d\n",tempStatus);
+				//fprintf(stderr,"out status: %d\n",outStatus);
 			} else{
 				perror("pipeChain");
 				free(fd);
 				free(pipeChain);
 				free(table);
-				return errno;
+				return MY_ERR;
 			}
-			exit(EXIT_SUCCESS);
+			exit(tempStatus);
 		} else{
 			table[i].pid = pid;
 			if(i > 0){
@@ -131,15 +137,17 @@ int processPipe(CMD *cmd, int *backgrounded){
 			close(fdin);
 		}
 		if(pipeChain[numPiped-1] != 0){
-			processHelper(pipeChain[numPiped-1],backgrounded);
+			tempStatus = processHelper(pipeChain[numPiped-1],backgrounded);
+			//fprintf(stderr,"temp status: %d\n",tempStatus);
+			//fprintf(stderr,"out status: %d\n",outStatus);
 		} else{
 			perror("pipeChain");
 			free(fd);
 			free(pipeChain);
 			free(table);
-			return errno;
+			return MY_ERR;
 		}
-		exit(EXIT_SUCCESS);
+		exit(tempStatus);
 	} else{
 		table[numPiped-1].pid = pid;
 		if(i > 0){
@@ -153,15 +161,28 @@ int processPipe(CMD *cmd, int *backgrounded){
 		}
 		if(j < numPiped){
 			table[j].status = status;
+			//fprintf(stderr,"status: %d\n",WEXITSTATUS(status));
 			i++;
+		}
+	}
+
+	for(i=0;i<numPiped;i++){
+		if(table[i].status) {
+			outStatus = table[i].status;
 		}
 	}
 
 	free(fd);
 	free(pipeChain);
 	free(table);
+	//fprintf(stderr,"out status out: %d\n",outStatus);
 
-	return EXIT_SUCCESS;
+	char toSet[256];
+	sprintf(toSet,"%d",outStatus);
+	//fprintf(stderr,"toSet: %s\n",toSet);
+	setenv("?",toSet,1);
+
+	return EXIT_STATUS(outStatus);
 }
 
 int processStage(CMD *cmd, int *backgrounded){
@@ -187,19 +208,32 @@ int processStage(CMD *cmd, int *backgrounded){
 	if(cmd->left != 0){
 		leftStatus = processHelper(cmd->left,backgrounded);
 	}
+	int reapedPid;
 	switch(cmd->type){
 		case SIMPLE:
 			if(strcmp(cmd->argv[0],"cd") == 0){
 				if(cmd->argc < 2){
-					chdir(getenv("HOME"));
+					if(chdir(getenv("HOME")) == -1){
+						perror("chdir");
+						return errno;
+					}
 				} else{
-					chdir(cmd->argv[1]);
+					if(chdir(cmd->argv[1]) == -1){
+						perror("chdir");
+						return errno;
+					}
 				}
 			} else if(strcmp(cmd->argv[0],"dirs") == 0){
 				char *buffer = malloc(sizeof(char)*(PATH_MAX + 1));
 				printf("%s\n",getcwd(buffer,PATH_MAX + 1));
 				free(buffer);
-			} else{
+			} else if(strcmp(cmd->argv[0],"wait") == 0){
+				while((reapedPid = waitpid((pid_t)-1, &status, 0)) != -1){
+					if(reapedPid != 0){
+						fprintf(stderr,"Completed: %d (%d)\n",reapedPid,status);
+					}
+				}
+			}else{
 				pid = fork();
 				if(pid == 0){
 					//child
@@ -211,7 +245,8 @@ int processStage(CMD *cmd, int *backgrounded){
 						if(from != STDI){
 							close(from);
 						}
-						return errno;
+						exit(errno);
+						//return errno;
 					}
 					if(dup2(from,STDI) == -1){
 						perror("dup2");
@@ -221,7 +256,8 @@ int processStage(CMD *cmd, int *backgrounded){
 						if(from != STDI){
 							close(from);
 						}
-						return errno;
+						exit(errno);
+						//return errno;
 					}
 					for(int i=0;i<cmd->nLocal;i++){
 						if(setenv(cmd->locVar[i],cmd->locVal[i],1) != 0){
@@ -232,7 +268,8 @@ int processStage(CMD *cmd, int *backgrounded){
 							if(from != STDI){
 								close(from);
 							}
-							return errno;
+							exit(errno);
+							//return errno;
 						}
 					}
 					status = execvp(cmd->argv[0],cmd->argv);
@@ -244,7 +281,8 @@ int processStage(CMD *cmd, int *backgrounded){
 						if(from != STDI){
 							close(from);
 						}
-						return errno;
+						exit(errno);
+						//return errno;
 					}
 					for(int i=0;i<cmd->nLocal;i++){
 						if(unsetenv(cmd->locVar[i]) != 0){
@@ -255,7 +293,8 @@ int processStage(CMD *cmd, int *backgrounded){
 							if(from != STDI){
 								close(from);
 							}
-							return errno;
+							exit(errno);
+							//return errno;
 						}
 					}
 				} else if(pid < 0){
@@ -273,8 +312,9 @@ int processStage(CMD *cmd, int *backgrounded){
 						waitpid(pid, &status, 0);
 					} else if (leftStatus != 1){
 						fprintf(stderr,"Backgrounded: %d\n",pid);
-						waitpid(pid, &status, WNOHANG);
-						fprintf(stderr,"Completed: %d (%d)\n",pid,status);
+						//waitpid(pid, &status, WNOHANG);
+						//fprintf(stderr,"Completed: %d (%d)\n",pid,status);
+
 					}
 				}
 			}
@@ -295,31 +335,45 @@ int processStage(CMD *cmd, int *backgrounded){
 	if(from != STDI){
 		close(from);
 	}
-	return status;
+	return EXIT_STATUS(status);
 }
 
 int processHelper(CMD *cmd, int *backgrounded){
+	int status = 0;
+	int reapedPid;
+	while(((reapedPid = waitpid((pid_t)-1, &status, WNOHANG)) != -1) && (reapedPid != 0)){
+		fprintf(stderr,"Completed: %d (%d)\n",reapedPid,status);
+	}
 	int rightNoBack = (*backgrounded);
 	if(cmd == 0){
 		return 1;
 	}
+	status = 0;
+	int statusChanged = 0;
+	int endLeft = 0;
 	int leftStatus = 0;
-	int status = 0;
+	int rightStatus = 0;
 	int secondFlag = 1;
 	if(cmd->type == SEP_BG){
 		(*backgrounded) = 1;
 	}
 	if(cmd->type != PIPE){
-		if(cmd->left != 0){
-			leftStatus = processHelper(cmd->left,backgrounded);
+		if((cmd->left != 0){
+			if(cmd->type != SEP_END){
+				leftStatus = processHelper(cmd->left,backgrounded);
+			} else{
+				leftStatus = processHelper(cmd->left,&endLeft);
+			}
 		}
 
 		switch(cmd->type){
 			case SIMPLE:
 				status = processStage(cmd,backgrounded);
+				if(!(*backgrounded)){
+					statusChanged = 1;
+				}
 				break;
 			case PIPE:
-				printf("PIPE\n");
 				break;
 			case SEP_AND:
 				if(leftStatus != 0){
@@ -337,6 +391,9 @@ int processHelper(CMD *cmd, int *backgrounded){
 				break;
 			case SUBCMD:
 				status = processStage(cmd,backgrounded);
+				if(!(*backgrounded)){
+					statusChanged = 1;
+				}
 				break;
 			case NONE:
 				printf("NONE\n");
@@ -345,12 +402,29 @@ int processHelper(CMD *cmd, int *backgrounded){
 				break;
 		}
 		if((cmd->right != 0) && secondFlag){
-			processHelper(cmd->right,&rightNoBack);
+			rightStatus = processHelper(cmd->right,&rightNoBack);
 		}
 	} else{
 		//pipe
-		processPipe(cmd,backgrounded);
+		status = processPipe(cmd,backgrounded);
+		if(!(*backgrounded)){
+			statusChanged = 1;
+		}
 	}
+	if(statusChanged){
+		char toSet[256];
+		sprintf(toSet,"%d",status);
+		//fprintf(stderr,"toSet: %s\n",toSet);
+		setenv("?",toSet,1);
+	}
+	//fprintf(stderr,"exit status before left: %d\n",status);
+	if(leftStatus != 0){
+		status = leftStatus;
+	}
+	if(rightStatus != 0){
+		status = rightStatus;
+	}
+	//fprintf(stderr,"exit status: %d\n",status);
 	return status;
 }
 
