@@ -66,7 +66,6 @@ int processPipe(CMD *cmd){
 	CMD **pipeChain = extractPipeChain(cmd,&chainSize,&numPiped);
 	pipeChain = realloc(pipeChain,sizeof(CMD *)*(numPiped));
 
-	//TODO: use pipe.c on pipeChain
 	struct entry{
 		int pid, status;
 	};
@@ -81,6 +80,9 @@ int processPipe(CMD *cmd){
 
 	if(numPiped < 2){
 		fprintf(stderr,"Usage: piping less than 2 streams");
+		free(fd);
+		free(pipeChain);
+		free(table);
 		exit(0);
 	}
 
@@ -104,7 +106,9 @@ int processPipe(CMD *cmd){
 				processHelper(pipeChain[i]);
 			} else{
 				perror("pipeChain");
-
+				free(fd);
+				free(pipeChain);
+				free(table);
 				return errno;
 			}
 			exit(EXIT_SUCCESS);
@@ -129,6 +133,9 @@ int processPipe(CMD *cmd){
 			processHelper(pipeChain[numPiped-1]);
 		} else{
 			perror("pipeChain");
+			free(fd);
+			free(pipeChain);
+			free(table);
 			return errno;
 		}
 		exit(EXIT_SUCCESS);
@@ -196,31 +203,67 @@ int processStage(CMD *cmd){
 					//child
 					if(dup2(to,STDO) == -1){
 						perror("dup2");
+						if(to != STDO){
+							close(to);
+						}
+						if(from != STDI){
+							close(from);
+						}
 						return errno;
 					}
 					if(dup2(from,STDI) == -1){
 						perror("dup2");
+						if(to != STDO){
+							close(to);
+						}
+						if(from != STDI){
+							close(from);
+						}
 						return errno;
 					}
 					for(int i=0;i<cmd->nLocal;i++){
 						if(setenv(cmd->locVar[i],cmd->locVal[i],1) != 0){
 							perror("setenv");
+							if(to != STDO){
+								close(to);
+							}
+							if(from != STDI){
+								close(from);
+							}
 							return errno;
 						}
 					}
 					status = execvp(cmd->argv[0],cmd->argv);
 					if(status < 0){
 						perror("execvp");
+						if(to != STDO){
+							close(to);
+						}
+						if(from != STDI){
+							close(from);
+						}
 						return errno;
 					}
 					for(int i=0;i<cmd->nLocal;i++){
 						if(unsetenv(cmd->locVar[i]) != 0){
 							perror("setenv");
+							if(to != STDO){
+								close(to);
+							}
+							if(from != STDI){
+								close(from);
+							}
 							return errno;
 						}
 					}
 				} else if(pid < 0){
 					perror("fork");
+					if(to != STDO){
+						close(to);
+					}
+					if(from != STDI){
+						close(from);
+					}
 					return errno;
 				} else{
 					//parent
