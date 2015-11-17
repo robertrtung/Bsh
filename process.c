@@ -22,23 +22,23 @@
 
 CMD **extractPipeChain(CMD *cmd, int *size, int *count);
 
-int processStage(CMD *cmd, int *backgrounded);
+int processStage(CMD *cmd, int *backgrounded, int oldTo, int oldFrom);
 
-int processPipe(CMD *cmd, int *backgrounded);
+int processPipe(CMD *cmd, int *backgrounded, int oldTo, int oldFrom);
 
-int processHelper(CMD *cmd, int *backgrounded);
+int processHelper(CMD *cmd, int *backgrounded, int oldTo, int oldFrom);
 
 int process(CMD *cmd);
 
-int processSub(CMD *cmd, int *backgrounded);
+int processSub(CMD *cmd, int *backgrounded, int oldTo, int oldFrom);
 
-void openIO(CMD *cmd, int *to, int *from);
+void openIO(CMD *cmd, int *to, int *from, int oldTo, int oldFrom);
 
-void closeIO(int to, int from);
+void closeIO(int to, int from, int oldTo, int oldFrom);
 
-void setLocal(CMD *cmd, int to, int from);
+void setLocal(CMD *cmd, int to, int from,int oldTo, int oldFrom);
 
-void unsetLocal(CMD *cmd, int to, int from);
+void unsetLocal(CMD *cmd, int to, int from,int oldTo, int oldFrom);
 
 //TODO: implement signals
 //TODO: fix status updates
@@ -69,7 +69,7 @@ CMD **extractPipeChain(CMD *cmd, int *size, int *count){
 	return pipeChain;
 }
 
-int processPipe(CMD *cmd, int *backgrounded){
+int processPipe(CMD *cmd, int *backgrounded,int oldTo, int oldFrom){
 	if(cmd->type != PIPE){
 		fprintf(stderr,"Entered wrong function!\n");
 		return MY_ERR;
@@ -118,7 +118,7 @@ int processPipe(CMD *cmd, int *backgrounded){
 				close(fd[1]);
 			}
 			if(pipeChain[i] != 0){
-				tempStatus = processHelper(pipeChain[i],backgrounded);
+				tempStatus = processHelper(pipeChain[i],backgrounded,oldTo,oldFrom);
 				//fprintf(stderr,"temp status: %d\n",tempStatus);
 				//fprintf(stderr,"out status: %d\n",outStatus);
 			} else{
@@ -147,7 +147,7 @@ int processPipe(CMD *cmd, int *backgrounded){
 			close(fdin);
 		}
 		if(pipeChain[numPiped-1] != 0){
-			tempStatus = processHelper(pipeChain[numPiped-1],backgrounded);
+			tempStatus = processHelper(pipeChain[numPiped-1],backgrounded,oldTo,oldFrom);
 			//fprintf(stderr,"temp status: %d\n",tempStatus);
 			//fprintf(stderr,"out status: %d\n",outStatus);
 		} else{
@@ -195,63 +195,63 @@ int processPipe(CMD *cmd, int *backgrounded){
 	return EXIT_STATUS(outStatus);
 }
 
-void openIO(CMD *cmd, int *to, int *from){
+void openIO(CMD *cmd, int *to, int *from, int oldTo, int oldFrom){
 	if(cmd->toType == RED_OUT){
 		(*to) = open(cmd->toFile,O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR);
 	} else if(cmd->toType == RED_OUT_APP){
 		(*to) = open(cmd->toFile,O_APPEND | O_CREAT | O_RDWR, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR);
 	} else{
-		(*to) = STDO;
+		(*to) = oldTo;
 	}
 	if(cmd->fromType == RED_IN){
 		(*from) = open(cmd->fromFile,O_RDONLY);
 	} else{
-		(*from) = STDI;
+		(*from) = oldFrom;
 	}
 }
 
-void closeIO(int to, int from){
-	if(to != STDO){
+void closeIO(int to, int from,int oldTo, int oldFrom){
+	if((to != STDO) && (oldTo == STDO)){
 		close(to);
 	}
-	if(from != STDI){
+	if((from != STDI) && (oldFrom == STDI)){
 		close(from);
 	}
 }
 
-void setLocal(CMD *cmd, int to, int from){
+void setLocal(CMD *cmd, int to, int from, int oldTo, int oldFrom){
 	for(int i=0;i<cmd->nLocal;i++){
 		if(setenv(cmd->locVar[i],cmd->locVal[i],1) != 0){
 			perror("setenv");
-			closeIO(to,from);
+			closeIO(to,from,oldTo,oldFrom);
 			exit(errno);
 			//return errno;
 		}
 	}
 }
 
-void unsetLocal(CMD *cmd, int to, int from){
+void unsetLocal(CMD *cmd, int to, int from, int oldTo, int oldFrom){
 	for(int i=0;i<cmd->nLocal;i++){
 		if(unsetenv(cmd->locVar[i]) != 0){
 			perror("setenv");
-			closeIO(to,from);
+			closeIO(to,from,oldTo,oldFrom);
 			exit(errno);
 			//return errno;
 		}
 	}
 }
 
-int processStage(CMD *cmd, int *backgrounded){
+int processStage(CMD *cmd, int *backgrounded,int oldTo, int oldFrom){
 	int rightNoBack = (*backgrounded);
 	int to;
 	int from;
-	openIO(cmd,&to,&from);
+	openIO(cmd,&to,&from,oldTo,oldFrom);
 	int leftStatus = 0;
 	pid_t pid;
 	int status = 0;
 	int secondFlag = 1;
 	if((cmd->left != 0) && (cmd->type != SUBCMD)){
-		leftStatus = processHelper(cmd->left,backgrounded);
+		leftStatus = processHelper(cmd->left,backgrounded,oldTo,oldFrom);
 	}
 	int reapedPid;
 	switch(cmd->type){
@@ -283,29 +283,30 @@ int processStage(CMD *cmd, int *backgrounded){
 				if(pid == 0){
 					//child
 					if(dup2(to,STDO) == -1){
-						perror("dup2");
-						closeIO(to,from);
+						perror("dup21");
+						closeIO(to,from,oldTo,oldFrom);
 						exit(errno);
 						//return errno;
 					}
 					if(dup2(from,STDI) == -1){
-						perror("dup2");
-						closeIO(to,from);
+						perror("dup22");
+						closeIO(to,from,oldTo,oldFrom);
 						exit(errno);
 						//return errno;
 					}
-					setLocal(cmd,to,from);
+					setLocal(cmd,to,from,oldTo,oldFrom);
 					status = execvp(cmd->argv[0],cmd->argv);
 					if(status < 0){
 						perror("execvp");
-						closeIO(to,from);
+						closeIO(to,from,oldTo,oldFrom);
 						exit(errno);
 						//return errno;
 					}
-					unsetLocal(cmd,to,from);
+					unsetLocal(cmd,to,from,oldTo,oldFrom);
+					exit(status);
 				} else if(pid < 0){
 					perror("fork");
-					closeIO(to,from);
+					closeIO(to,from,oldTo,oldFrom);
 					return errno;
 				} else{
 					//parent
@@ -321,7 +322,7 @@ int processStage(CMD *cmd, int *backgrounded){
 			}
 			break;
 		case SUBCMD:
-			processSub(cmd,backgrounded);
+			processSub(cmd,backgrounded,oldTo,oldFrom);
 			secondFlag = 0;
 			break;
 		default:
@@ -329,18 +330,18 @@ int processStage(CMD *cmd, int *backgrounded){
 			break;
 	}
 	if((cmd->right != 0) && secondFlag){
-		processHelper(cmd->right,&rightNoBack);
+		processHelper(cmd->right,&rightNoBack,oldTo,oldFrom);
 	}
-	closeIO(to,from);
+	closeIO(to,from,oldTo,oldFrom);
 	return EXIT_STATUS(status);
 }
 
-int processSub(CMD *cmd, int *backgrounded){
+int processSub(CMD *cmd, int *backgrounded, int oldTo, int oldFrom){
 	pid_t pid;
 	int status = 0;
 	int to;
 	int from;
-	openIO(cmd,&to,&from);
+	openIO(cmd,&to,&from,oldTo,oldFrom);
 	if(cmd->type != SUBCMD){
 		fprintf(stderr,"In wrong function!\n");
 		return MY_ERR;
@@ -348,22 +349,23 @@ int processSub(CMD *cmd, int *backgrounded){
 	pid = fork();
 	if(pid == 0){
 		//child
-		status = processHelper(cmd->left,backgrounded);
+		status = processHelper(cmd->left,backgrounded,to,from);
 		if(dup2(to,STDO) == -1){
-			perror("dup2");
-			closeIO(to,from);
+			perror("dup23");
+			closeIO(to,from,oldTo,oldFrom);
 			exit(errno);
 			//return errno;
 		}
 		if(dup2(from,STDI) == -1){
-			perror("dup2");
-			closeIO(to,from);
+			perror("dup24");
+			closeIO(to,from,oldTo,oldFrom);
 			exit(errno);
 			//return errno;
 		}
+		exit(status);
 	} else if(pid < 0){
 		perror("fork");
-		closeIO(to,from);
+		closeIO(to,from,oldTo,oldFrom);
 		return errno;
 	} else{
 		//parent
@@ -373,11 +375,12 @@ int processSub(CMD *cmd, int *backgrounded){
 			fprintf(stderr,"Backgrounded: %d\n",pid);
 		}
 	}
-	closeIO(to,from);
+	closeIO(to,from,STDO,STDI);
 	return status;
 }
 
-int processHelper(CMD *cmd, int *backgrounded){
+int processHelper(CMD *cmd, int *backgrounded,int oldTo, int oldFrom){
+	setLocal(cmd,STDO,STDI,STDO,STDI);
 	int status = 0;
 	int reapedPid;
 	while(((reapedPid = waitpid((pid_t)-1, &status, WNOHANG)) != -1) && (reapedPid != 0)){
@@ -399,15 +402,15 @@ int processHelper(CMD *cmd, int *backgrounded){
 	if(cmd->type != PIPE){
 		if((cmd->left != 0) && (cmd->type != SUBCMD)){
 			if(cmd->type != SEP_END){
-				leftStatus = processHelper(cmd->left,backgrounded);
+				leftStatus = processHelper(cmd->left,backgrounded,oldTo,oldFrom);
 			} else{
-				leftStatus = processHelper(cmd->left,&endLeft);
+				leftStatus = processHelper(cmd->left,&endLeft,oldTo,oldFrom);
 			}
 		}
 
 		switch(cmd->type){
 			case SIMPLE:
-				status = processStage(cmd,backgrounded);
+				status = processStage(cmd,backgrounded,oldTo,oldFrom);
 				if(!(*backgrounded)){
 					statusChanged = 1;
 				}
@@ -429,7 +432,7 @@ int processHelper(CMD *cmd, int *backgrounded){
 			case SEP_BG:
 				break;
 			case SUBCMD:
-				status = processStage(cmd,backgrounded);
+				status = processStage(cmd,backgrounded,oldTo,oldFrom);
 				if(!(*backgrounded)){
 					statusChanged = 1;
 				}
@@ -441,11 +444,11 @@ int processHelper(CMD *cmd, int *backgrounded){
 				break;
 		}
 		if((cmd->right != 0) && secondFlag){
-			rightStatus = processHelper(cmd->right,&rightNoBack);
+			rightStatus = processHelper(cmd->right,&rightNoBack,oldTo,oldFrom);
 		}
 	} else{
 		//pipe
-		status = processPipe(cmd,backgrounded);
+		status = processPipe(cmd,backgrounded,oldTo,oldFrom);
 		if(!(*backgrounded)){
 			statusChanged = 1;
 		}
@@ -463,12 +466,13 @@ int processHelper(CMD *cmd, int *backgrounded){
 	if(rightStatus != 0){
 		status = rightStatus;
 	}
+	unsetLocal(cmd,STDO,STDI,STDO,STDI);
 	//fprintf(stderr,"exit status: %d\n",status);
 	return status;
 }
 
 int process(CMD *cmd){
 	int backgrounded = 0;
-	processHelper(cmd,&backgrounded);
+	processHelper(cmd,&backgrounded,STDO,STDI);
 	return 1;
 }
