@@ -202,6 +202,7 @@ int openIO(CMD *cmd, int *to, int *from, int oldTo, int oldFrom){
 			close((*to));
 		}
 		(*to) = open(cmd->toFile,O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR);
+		//fprintf(stderr,"to: %d\n",(*to));
 		if((*to) < 0){
 			perror("open");
 			return errno;
@@ -211,6 +212,7 @@ int openIO(CMD *cmd, int *to, int *from, int oldTo, int oldFrom){
 			close((*to));
 		}
 		(*to) = open(cmd->toFile,O_APPEND | O_CREAT | O_RDWR, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR);
+		//fprintf(stderr,"to: %d\n",(*to));
 		if((*to) < 0){
 			perror("open");
 			return errno;
@@ -223,6 +225,7 @@ int openIO(CMD *cmd, int *to, int *from, int oldTo, int oldFrom){
 			close((*from));
 		}
 		(*from) = open(cmd->fromFile,O_RDONLY);
+		//fprintf(stderr,"from: %d\n",(*from));
 		if((*from) < 0){
 			perror("open");
 			return errno;
@@ -266,9 +269,9 @@ void unsetLocal(CMD *cmd, int to, int from, int oldTo, int oldFrom){
 
 int processStage(CMD *cmd, int *backgrounded,int oldTo, int oldFrom){
 	int rightNoBack = (*backgrounded);
-	int to;
-	int from;
-	if(openIO(cmd,&to,&from,oldTo,oldFrom) < 0){
+	int to = STDO;
+	int from = STDI;
+	if(openIO(cmd,&to,&from,oldTo,oldFrom) != 0){
 		closeIO(to,from,oldTo,oldFrom);
 		return errno;
 	}
@@ -370,9 +373,9 @@ int processStage(CMD *cmd, int *backgrounded,int oldTo, int oldFrom){
 int processSub(CMD *cmd, int *backgrounded, int oldTo, int oldFrom){
 	pid_t pid;
 	int status = 0;
-	int to;
-	int from;
-	if(openIO(cmd,&to,&from,oldTo,oldFrom) < 0){
+	int to = STDO;
+	int from = STDI;
+	if(openIO(cmd,&to,&from,oldTo,oldFrom) != 0){
 		closeIO(to,from,oldTo,oldFrom);
 		return errno;
 	}
