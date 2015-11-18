@@ -36,6 +36,8 @@ int processStage(CMD *cmd, int *backgrounded, int oldTo, int oldFrom);
 
 int processSub(CMD *cmd, int *backgrounded, int oldTo, int oldFrom);
 
+//int isolateUnbackgrounded(CMD *cmd, int oldTo, int oldFrom);
+
 int processHelper(CMD *cmd, int *backgrounded, int oldTo, int oldFrom);
 
 int process(CMD *cmd);
@@ -436,6 +438,19 @@ int processSub(CMD *cmd, int *backgrounded, int oldTo, int oldFrom){
 	return status;
 }
 
+/*int isolateUnbackgrounded(CMD *cmd, int oldTo, int oldFrom){
+	if(cmd->type != SEP_BG){
+		return MY_ERR;
+	}
+	if((cmd->left == 0) || (cmd->left->type != SEP_END)){
+		return 0;
+	}
+	CMD *unbackgrounded = cmd->left->left;
+	cmd->left->left = 0;
+	int dontBackground = 0;
+	return(processHelper(unbackgrounded,&dontBackground,oldTo,oldFrom));
+}*/
+
 int processHelper(CMD *cmd, int *backgrounded,int oldTo, int oldFrom){
 	if(cmd->type == NONE){
 		return 1;
@@ -456,22 +471,43 @@ int processHelper(CMD *cmd, int *backgrounded,int oldTo, int oldFrom){
 	int leftStatus = 0;
 	int rightStatus = 0;
 	int secondFlag = 1;
+	int isolateStatus = 0;
 	pid_t pid;
 	char toSet[256];
 	if((cmd->type == SEP_BG) && (cmd->left != 0)){
 		(*backgrounded) = 1;
-		pid = fork();
-		if(pid == 0){
-			//child
-			leftStatus = processHelper(cmd->left,backgrounded,oldTo,oldFrom);
-			exit(leftStatus);
-		} else if(pid < 0){
-			perror("fork");
-			return errno;
-		} else {
-			sprintf(toSet,"%d",0);
-			setenv("?",toSet,1);
-			fprintf(stderr,"Backgrounded: %d\n",pid);
+		/*if((isolateStatus = isolateUnbackgrounded(cmd,oldTo,oldFrom)) < 0){
+			return isolateStatus;
+		}*/
+		if(cmd->left->type != SEP_END){
+			pid = fork();
+			if(pid == 0){
+				//child
+				leftStatus = processHelper(cmd->left,backgrounded,oldTo,oldFrom);
+				exit(leftStatus);
+			} else if(pid < 0){
+				perror("fork");
+				return errno;
+			} else {
+				sprintf(toSet,"%d",0);
+				setenv("?",toSet,1);
+				fprintf(stderr,"Backgrounded: %d\n",pid);
+			}
+		} else{
+			leftStatus = processHelper(cmd->left->left,&endLeft,oldTo,oldFrom);
+			pid = fork();
+			if(pid == 0){
+				//child
+				leftStatus = processHelper(cmd->left->right,backgrounded,oldTo,oldFrom);
+				exit(leftStatus);
+			} else if(pid < 0){
+				perror("fork");
+				return errno;
+			} else {
+				sprintf(toSet,"%d",0);
+				setenv("?",toSet,1);
+				fprintf(stderr,"Backgrounded: %d\n",pid);
+			}
 		}
 	}
 	if(cmd->type != PIPE){
