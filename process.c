@@ -36,8 +36,6 @@ int processStage(CMD *cmd, int *backgrounded, int oldTo, int oldFrom);
 
 int processSub(CMD *cmd, int *backgrounded, int oldTo, int oldFrom);
 
-//int isolateUnbackgrounded(CMD *cmd, int oldTo, int oldFrom);
-
 int processHelper(CMD *cmd, int *backgrounded, int oldTo, int oldFrom);
 
 int process(CMD *cmd);
@@ -207,7 +205,6 @@ int openIO(CMD *cmd, int *to, int *from, int oldTo, int oldFrom){
 			close((*to));
 		}
 		(*to) = open(cmd->toFile,O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR);
-		//fprintf(stderr,"to: %d\n",(*to));
 		if((*to) < 0){
 			perror("open");
 			return errno;
@@ -217,7 +214,6 @@ int openIO(CMD *cmd, int *to, int *from, int oldTo, int oldFrom){
 			close((*to));
 		}
 		(*to) = open(cmd->toFile,O_APPEND | O_CREAT | O_RDWR, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR);
-		//fprintf(stderr,"to: %d\n",(*to));
 		if((*to) < 0){
 			perror("open");
 			return errno;
@@ -230,7 +226,6 @@ int openIO(CMD *cmd, int *to, int *from, int oldTo, int oldFrom){
 			close((*from));
 		}
 		(*from) = open(cmd->fromFile,O_RDONLY);
-		//fprintf(stderr,"from: %d\n",(*from));
 		if((*from) < 0){
 			perror("open");
 			return errno;
@@ -256,7 +251,6 @@ void setLocal(CMD *cmd, int to, int from, int oldTo, int oldFrom){
 			perror("setenv");
 			closeIO(to,from,oldTo,oldFrom);
 			exit(errno);
-			//return errno;
 		}
 	}
 }
@@ -267,13 +261,11 @@ void unsetLocal(CMD *cmd, int to, int from, int oldTo, int oldFrom){
 			perror("setenv");
 			closeIO(to,from,oldTo,oldFrom);
 			exit(errno);
-			//return errno;
 		}
 	}
 }
 
 int processStage(CMD *cmd, int *backgrounded,int oldTo, int oldFrom){
-	//fprintf(stderr,"name: %s, backgrounded: %d\n",cmd->argv[1],*backgrounded);
 	int rightNoBack = (*backgrounded);
 	int to = STDO;
 	int from = STDI;
@@ -320,9 +312,7 @@ int processStage(CMD *cmd, int *backgrounded,int oldTo, int oldFrom){
 					if(reapedPid != 0){
 						fprintf(stderr,"Completed: %d (%d)\n",reapedPid,status);
 					}
-					//fprintf(stderr,"reaped pid: %d\n",reapedPid);
 				}
-				//fprintf(stderr,"HERE\n");
 			}else{
 				pid = fork();
 				if(pid == 0){
@@ -331,13 +321,11 @@ int processStage(CMD *cmd, int *backgrounded,int oldTo, int oldFrom){
 						perror("dup2");
 						closeIO(to,from,oldTo,oldFrom);
 						exit(errno);
-						//return errno;
 					}
 					if(dup2(from,STDI) == -1){
 						perror("dup2");
 						closeIO(to,from,oldTo,oldFrom);
 						exit(errno);
-						//return errno;
 					}
 					setLocal(cmd,to,from,oldTo,oldFrom);
 					status = execvp(cmd->argv[0],cmd->argv);
@@ -345,7 +333,6 @@ int processStage(CMD *cmd, int *backgrounded,int oldTo, int oldFrom){
 						perror("execvp");
 						closeIO(to,from,oldTo,oldFrom);
 						exit(errno);
-						//return errno;
 					}
 					unsetLocal(cmd,to,from,oldTo,oldFrom);
 					exit(status);
@@ -355,12 +342,7 @@ int processStage(CMD *cmd, int *backgrounded,int oldTo, int oldFrom){
 					return errno;
 				} else{
 					//parent
-					//fprintf(stdout,"Executing: %s on %s and %s with pid: %d\n",cmd->argv[0],cmd->argv[1],cmd->argv[2],pid);
-					//if((!(*backgrounded))){
-						waitpid(pid, &status, 0);
-					//} else{
-						//fprintf(stderr,"Backgrounded: %d\n",pid);
-					//}
+					waitpid(pid, &status, 0);
 				}
 			}
 			break;
@@ -410,13 +392,11 @@ int processSub(CMD *cmd, int *backgrounded, int oldTo, int oldFrom){
 			perror("dup2");
 			closeIO(to,from,oldTo,oldFrom);
 			exit(errno);
-			//return errno;
 		}
 		if(dup2(from,STDI) == -1){
 			perror("dup2");
 			closeIO(to,from,oldTo,oldFrom);
 			exit(errno);
-			//return errno;
 		}
 		exit(status);
 	} else if(pid < 0){
@@ -424,12 +404,7 @@ int processSub(CMD *cmd, int *backgrounded, int oldTo, int oldFrom){
 		closeIO(to,from,oldTo,oldFrom);
 		return errno;
 	} else{
-		//parent
-		//if(!(*backgrounded)){
-			waitpid(pid, &status, 0);
-		//} else{
-			//fprintf(stderr,"Backgrounded: %d\n",pid);
-		//}
+		waitpid(pid, &status, 0);
 	}
 	closeIO(to,from,STDO,STDI);
 	if(*backgrounded){
@@ -437,19 +412,6 @@ int processSub(CMD *cmd, int *backgrounded, int oldTo, int oldFrom){
 	}
 	return status;
 }
-
-/*int isolateUnbackgrounded(CMD *cmd, int oldTo, int oldFrom){
-	if(cmd->type != SEP_BG){
-		return MY_ERR;
-	}
-	if((cmd->left == 0) || (cmd->left->type != SEP_END)){
-		return 0;
-	}
-	CMD *unbackgrounded = cmd->left->left;
-	cmd->left->left = 0;
-	int dontBackground = 0;
-	return(processHelper(unbackgrounded,&dontBackground,oldTo,oldFrom));
-}*/
 
 int processHelper(CMD *cmd, int *backgrounded,int oldTo, int oldFrom){
 	if(cmd->type == NONE){
@@ -476,9 +438,6 @@ int processHelper(CMD *cmd, int *backgrounded,int oldTo, int oldFrom){
 	char toSet[256];
 	if((cmd->type == SEP_BG) && (cmd->left != 0)){
 		(*backgrounded) = 1;
-		/*if((isolateStatus = isolateUnbackgrounded(cmd,oldTo,oldFrom)) < 0){
-			return isolateStatus;
-		}*/
 		if(cmd->left->type != SEP_END){
 			pid = fork();
 			if(pid == 0){
@@ -583,7 +542,6 @@ int processHelper(CMD *cmd, int *backgrounded,int oldTo, int oldFrom){
 }
 
 int process(CMD *cmd){
-	//dumpTree(cmd,0);
 	int backgrounded = 0;
 	processHelper(cmd,&backgrounded,STDO,STDI);
 	return 1;
