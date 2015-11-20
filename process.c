@@ -458,7 +458,25 @@ int processStage(CMD *cmd, int *backgrounded,int oldTo, int oldFrom){
 				}
 				unsetLocal(cmd,to,from,oldTo,oldFrom,envNames,envVals);
 				//print directory path
-				printf("%s\n",getcwd(buffer,PATH_MAX + 1));
+				if(cmd->toType == RED_OUT){
+					FILE *dirsout = fopen(cmd->toFile,"w");//outputstream of dirs
+					if(!dirsout){
+						perror("open");
+						return MY_ERR;
+					}
+					fprintf(dirsout,"%s\n",getcwd(buffer,PATH_MAX + 1));
+					fclose(dirsout);
+				} else if(cmd->toType == RED_OUT_APP){
+					FILE *dirsout = fopen(cmd->toFile,"a");//outputstream of dirs
+					if(!dirsout){
+						perror("open");
+						return MY_ERR;
+					}
+					fprintf(dirsout,"%s\n",getcwd(buffer,PATH_MAX + 1));
+					fclose(dirsout);
+				} else{
+					printf("%s\n",getcwd(buffer,PATH_MAX + 1));
+				}
 				free(buffer);
 			} else if(strcmp(cmd->argv[0],"wait") == 0){
 				//wait not handled by execvp
